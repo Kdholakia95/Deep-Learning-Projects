@@ -1,0 +1,1597 @@
+TASK-1
+
+
+Classifier using PCA 
+
+
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+import torch.optim as optim
+from tqdm.notebook import tqdm
+from torch.autograd import Variable
+import pandas as pd
+import numpy as np
+from sklearn.model_selection import train_test_split
+from torch.utils.data import TensorDataset
+import matplotlib.pyplot as plt
+import tensorflow as tf
+
+from google.colab import drive
+drive.mount('/content/drive')
+
+import glob
+
+dataset_no = 1
+if dataset_no ==2:
+  path =r'/content/drive/My Drive/Deep Learning/dataset1/'
+
+  filenames = {"Ankle boot.csv":0,"Dress.csv":1,"Shirt.csv":2,"T_shirt.csv":3,"Pullover.csv":4}
+
+  labels = []
+  dataset = []
+  for (filename, index) in filenames.items():
+  	pathadd = path + filename
+  	df = pd.read_csv(pathadd,header=None)
+  	print(df.shape)
+  	dataset.append(df)
+  	for i in range(df.shape[0]):
+      	labels.append(index)
+  # Concatenate all data into one DataFrame
+
+  big_frame = pd.concat(dataset,axis=0)
+  print(big_frame.shape)
+
+  big_frame = big_frame.to_numpy()
+
+  labels = np.array(labels)
+  print(labels.shape)
+
+
+
+else:
+  import glob
+
+  import pandas as pd
+
+  folder =r'/content/drive/My Drive/Deep Learning/dataset1/'
+
+  classes = {"coast":0,"forest":1,"mountain":2,"opencountry":3,"street":4}
+
+  labels = []
+  dataset = []
+  for subfolder,label in classes.items():
+	path= folder + subfolder + '/*.jpg_color_edh_entropy'
+	print(path)
+	files=glob.glob(path)
+	#print(label)
+	for f in files:
+  	#print(f)
+  	data = np.array(pd.read_csv(f,delim_whitespace=True,header=None)).flatten()
+  	# print(np.shape(data))
+  	dataset.append(data)
+  	labels.append(label)
+  big_frame = np.array(dataset)
+  print(big_frame.shape)
+  labels = np.array(labels)
+  print(labels.shape)
+  #print(big_frame.shape[1])
+
+from sklearn.decomposition import PCA
+n = 128 # number of component we want after recuction
+pca = PCA(n_components = n)   #creatig pca object
+pca.fit(big_frame)
+#print(pca.explained_variance_ratio_)   #variance explained by each selected components
+#print(pca.singular_values_)
+newbig_frame = pca.transform(big_frame)   #reducing dimension
+print(newbig_frame.shape)
+print(labels.shape)
+
+
+
+trn_x, val_x ,trn_y,val_y= train_test_split(newbig_frame,labels,test_size=0.20)
+#x_train, x_test, x_train_labels, x_test_labels
+print(trn_x.shape)
+print(val_x.shape)
+
+
+trn_x_torch = torch.from_numpy(trn_x).type(torch.FloatTensor)
+trn_y_torch = torch.from_numpy(trn_y)
+
+val_x_torch = torch.from_numpy(val_x).type(torch.FloatTensor)
+val_y_torch = torch.from_numpy(val_y)
+
+trn = TensorDataset(trn_x_torch,trn_y_torch)
+val = TensorDataset(val_x_torch,val_y_torch)
+
+trn_dataloader = torch.utils.data.DataLoader(trn,batch_size=1000,shuffle=False)
+val_dataloader = torch.utils.data.DataLoader(val,batch_size=1000,shuffle=False)
+
+Train_data = tf.convert_to_tensor(trn_x,dtype='float32')
+Test_data = tf.convert_to_tensor(val_x,dtype='float32')
+
+#show_torch_image(trn_x_torch[8])
+
+class Classifier(nn.Module):
+  def __init__(self):
+	super(Classifier,self).__init__()
+	num =32
+	self.net = nn.Sequential(
+    	nn.Linear(num,num*2), nn.Sigmoid(),
+    	nn.Linear(num*2,num*2),nn.Sigmoid(),
+    	nn.Linear(num*2,5),nn.LogSoftmax()
+	)
+
+  def forward(self,x):
+	x = self.net(x)
+	return x
+
+model = Classifier()
+
+classifier = nn.Sequential(*list(model.children())[:-1])
+model = classifier
+num = 128
+model.add_module('final_layer1' ,nn.Sequential(nn.Linear(num,num*2),nn.Tanh()))
+model.add_module('final_layer2' ,nn.Sequential(nn.Linear(num*2,num*2),nn.Tanh()))
+model.add_module('final_layer3' ,nn.Sequential(nn.Linear(num*2,5),nn.LogSoftmax()))
+
+
+#loss_func = nn.CrossEntropyLoss()
+loss_func = nn.NLLLoss()
+optimizer = optim.Adam(model.parameters(),lr=0.00001)
+
+print(model)
+
+losses = []
+EPOCHS = 200
+for epoch in range(EPOCHS):
+	total_loss=0.0
+	total =0.0
+	correct =0.0
+	total1=0.0
+	correct1=0.0
+	for batch_idx, (data,target) in enumerate(trn_dataloader):
+   	 
+    	data = torch.autograd.Variable(data)
+    	optimizer.zero_grad()
+   	 
+    	pred = model(data)
+   	 
+    	loss = loss_func(pred, target)
+   	 
+    	losses.append(loss.cpu().data.item())
+    	# Backpropagation
+    	loss.backward()
+   	 
+    	optimizer.step()
+    	total_loss+=loss.data
+	for data in trn_dataloader:
+    	inputs,labels = data
+    	inputs =torch.autograd.Variable(inputs)
+    	outputs = model(inputs)
+    	_, predicted = torch.max(outputs.data,1)
+    	total1 = total1 + labels.size(0)
+    	correct1 += (predicted==labels).sum()  
+	for data in val_dataloader:
+    	inputs,labels = data
+    	inputs =torch.autograd.Variable(inputs)
+    	outputs = model(inputs)
+    	_, predicted = torch.max(outputs.data,1)
+    	total = total + labels.size(0)
+    	correct += (predicted==labels).sum()
+ 	 
+	print('epoch no:%d Error=%d training Accuracy=%f Test Accuracy=%f'%(epoch+1,loss.item(),correct1/total1,correct/total))
+	#print('epoch no:%d  MSE=%f'%(epoch+1,correct/total))
+
+
+
+Classifier using Autoencoders
+
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+import torch.optim as optim
+from tqdm.notebook import tqdm
+from torch.autograd import Variable
+import pandas as pd
+import numpy as np
+from sklearn.model_selection import train_test_split
+from torch.utils.data import TensorDataset
+import matplotlib.pyplot as plt
+import tensorflow as tf
+import glob
+
+dataset_no = 2
+feat =0
+if dataset_no ==2:
+  path =r'/content/drive/My Drive/Colab Notebooks/282/'  #put here path for dataset 2
+  feat = 784
+
+  filenames = {"Ankle boot.csv":0,"Dress.csv":1,"Shirt.csv":2,"T_shirt.csv":3,"Pullover.csv":4}
+
+  labels = []
+  dataset = []
+  for (filename, index) in filenames.items():
+  	pathadd = path + filename
+  	df = pd.read_csv(pathadd,header=None)
+  	print(df.shape)
+  	dataset.append(df)
+  	for i in range(df.shape[0]):
+      	labels.append(index)
+  # Concatenate all data into one DataFrame
+
+  big_frame = pd.concat(dataset,axis=0)
+  print(big_frame.shape)
+
+  big_frame = big_frame.to_numpy()
+
+  labels = np.array(labels)
+  print(labels.shape)
+
+
+
+else:
+  import glob
+
+  import pandas as pd
+  feat = 828
+
+  folder =r'/content/drive/My Drive/Colab Notebooks/28/'  #put here path for dataset 1
+
+  classes = {"coast":0,"forest":1,"mountain":2,"opencountry":3,"street":4}
+
+  labels = []
+  dataset = []
+  for subfolder,label in classes.items():
+	path= folder + subfolder + '/*.jpg_color_edh_entropy'
+	print(path)
+	files=glob.glob(path)
+	#print(label)
+	for f in files:
+  	#print(f)
+  	data = np.array(pd.read_csv(f,delim_whitespace=True,header=None)).flatten()
+  	# print(np.shape(data))
+  	dataset.append(data)
+  	labels.append(label)
+  big_frame = np.array(dataset)
+  print(big_frame.shape)
+  labels = np.array(labels)
+  print(labels.shape)
+  print(big_frame.shape[1])
+
+trn_x, val_x ,trn_y,val_y = train_test_split(big_frame,labels,test_size=0.20)
+
+trn_x_torch = torch.from_numpy(trn_x).type(torch.FloatTensor)
+trn_y_torch = torch.from_numpy(trn_y)
+
+val_x_torch = torch.from_numpy(val_x).type(torch.FloatTensor)
+val_y_torch = torch.from_numpy(val_y)
+
+trn = TensorDataset(trn_x_torch,trn_y_torch)
+val = TensorDataset(val_x_torch,val_y_torch)
+
+trn_dataloader = torch.utils.data.DataLoader(trn,batch_size=1000,shuffle=False)
+val_dataloader = torch.utils.data.DataLoader(val,batch_size=1000,shuffle=False)
+
+
+Train_data = tf.convert_to_tensor(trn_x,dtype='float32')
+Test_data = tf.convert_to_tensor(val_x,dtype='float32')
+
+class Classifier(nn.Module):
+
+  def __init__(self):
+	super(Classifier,self).__init__()
+	num = 128
+
+	self.encoder = nn.Sequential(
+    	nn.Linear(feat,num),
+    	nn.Tanh()
+	)
+
+	self.decoder = nn.Sequential(
+    	nn.Linear(num,feat),
+    	nn.Tanh()
+	)
+
+  def forward(self,x):
+	x = self.encoder(x)
+	x = self.decoder(x)
+	return x
+
+network = Classifier()
+
+loss_func = nn.MSELoss()
+learning_rate = 0.01
+EPOCHS = 50
+for epoch in range(EPOCHS):
+	total_loss=0.0
+	for batch_idx, data in enumerate(trn_dataloader,0):
+    	inputs,labels = data
+    	inputs = torch.autograd.Variable(inputs)
+    	network.zero_grad()
+    	pred = network(inputs)
+    	loss = loss_func(pred, inputs)
+   	 
+    	loss.backward()
+    	for f in network.parameters():
+      	f.data.sub_(f.grad.data * learning_rate)
+    	#optimizer.step()
+    	total_loss+=loss.data
+	print('epoch no:%d  MSE=%f'%(epoch+1,loss.item()))
+
+classifier = nn.Sequential(*list(network.children())[:-1])
+#print(network)
+
+network = classifier
+num = 128
+hd = 512
+network.add_module('final_layer1' ,nn.Sequential(nn.Linear(num,hd),nn.Tanh()))
+network.add_module('final_layer2' ,nn.Sequential(nn.Linear(hd,hd),nn.Tanh()))
+network.add_module('final_layer3' ,nn.Sequential(nn.Linear(hd,5),nn.LogSoftmax()))
+
+
+
+loss_func = nn.NLLLoss()
+optimizer = torch.optim.Adam(network.parameters(), lr=.0001)
+losses = []
+EPOCHS = 200
+epoch_num=[]
+training_acc=[]
+testing_acc=[]
+for epoch in range(EPOCHS):
+	total_loss=0.0
+	total =0.0
+	correct =0.0
+	total1=0.0
+	correct1=0.0
+	for batch_idx, (data,target) in enumerate(trn_dataloader):
+   	 
+    	data = torch.autograd.Variable(data)
+    
+   	 
+    	optimizer.zero_grad()
+   	 
+    	pred = network(data)
+   	 
+    	loss = loss_func(pred, target)
+   	 
+    	losses.append(loss.cpu().data.item())
+    	#print(loss.cpu().data.item())
+    	# Backpropagation
+    	loss.backward()
+   	 
+    	optimizer.step()
+    	total_loss+=loss.data
+	for data in trn_dataloader:
+    	inputs,labels = data
+    	inputs =torch.autograd.Variable(inputs)
+    	outputs = network(inputs)
+    	_, predicted = torch.max(outputs.data,1)
+    	total1 = total1 + labels.size(0)
+    	correct1 += (predicted==labels).sum()  
+	for data in val_dataloader:
+    	inputs,labels = data
+    	inputs =torch.autograd.Variable(inputs)
+    	outputs = network(inputs)
+    	_, predicted = torch.max(outputs.data,1)
+    	total = total + labels.size(0)
+    	correct += (predicted==labels).sum()
+
+	epoch_num.append(epoch)
+	training_acc.append(correct1/total1)
+	testing_acc.append(correct/total)  
+	print('epoch no:%d Error=%d training Accuracy=%f Test Accuracy=%f'%(epoch+1,total_loss,correct1/total1,correct/total))
+	#print('epoch no:%d  MSE=%f'%(epoch+1,correct/total))
+
+outputs  = network(val_x_torch)
+_, predicted = torch.max(outputs.data,1)
+
+#plotting a confusion matrix
+from sklearn.metrics import confusion_matrix
+import seaborn as sns
+conf_matrix = confusion_matrix(predicted,val_y)
+plt.figure(figsize=(12, 12))
+sns.heatmap(conf_matrix, annot=True, fmt="d");
+plt.title("Confusion matrix")
+plt.ylabel('True class')
+plt.xlabel('Predicted class')
+plt.show()
+
+plt.plot(epoch_num,training_acc,Label = 'Training accuracy')
+plt.plot(epoch_num,testing_acc,Label = 'Testing accuracy')
+plt.xlabel('Epoch Number')
+plt.ylabel('Accuracy')
+plt.legend('for feature 64 and node 128')
+
+TASK-2
+
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+from torch.autograd import Variable
+import pandas as pd
+import numpy as np
+from sklearn.model_selection import train_test_split
+from torch.utils.data import TensorDataset
+import matplotlib.pyplot as plt
+import tensorflow as tf
+import glob
+import pandas as pd
+
+folder =r'/content/drive/My Drive/Deep Learning/dataset1/'
+classes = {"coast":0,"forest":1,"mountain":2,"opencountry":3,"street":4}
+
+labels = []
+dataset = []
+for subfolder,label in classes.items():
+  path= folder + subfolder + '/*.jpg_color_edh_entropy'
+  print(path)
+  files=glob.glob(path)
+  #print(label)
+  for f in files:
+    #print(f)
+    data = np.array(pd.read_csv(f,delim_whitespace=True,header=None)).flatten()
+    # print(np.shape(data))
+    dataset.append(data)
+    labels.append(label)
+
+big_frame = np.array(dataset)
+print(big_frame.shape) 
+labels = np.array(labels)
+labels_cpy = np.array(labels)
+print(labels.shape)
+print(big_frame.shape[1])
+
+#train test split(80% - 20%)
+trn_x, val_x ,trn_y,val_y = train_test_split(big_frame,labels_cpy,test_size=0.20)
+
+
+# converting the numpy array into tensor
+trn_x_torch = torch.from_numpy(trn_x).type(torch.FloatTensor)
+trn_y_torch = torch.from_numpy(trn_y)
+
+val_x_torch = torch.from_numpy(val_x).type(torch.FloatTensor)
+val_y_torch = torch.from_numpy(val_y)
+
+trn = TensorDataset(trn_x_torch,trn_y_torch)
+val = TensorDataset(val_x_torch,val_y_torch)
+
+trn_dataloader = torch.utils.data.DataLoader(trn,batch_size=100,shuffle=True)
+val_dataloader = torch.utils.data.DataLoader(val,batch_size=100,shuffle=False)
+
+class AANN(nn.Module):
+    def __init__(self,nodes1,nodes2):
+        super(AANN,self).__init__()
+
+        self.encoder = nn.Sequential(
+            nn.Linear(nodes1, nodes2),
+            nn.Tanh(),
+            nn.Dropout(0.5))
+        self.decoder = nn.Sequential(
+             nn.Linear(nodes2, nodes1), 
+             nn.Tanh(),
+             nn.Dropout(0.5))
+        
+    def forward(self, x):
+        x = self.encoder(x)
+        x = self.decoder(x)
+        return x
+
+def Plot(epoch_num,Loss):
+  plt.plot(epoch_num,Loss)
+  plt.xlabel('Epoch Number')
+  plt.ylabel('Training Error')
+  plt.title('Plot of Epoch Number vs Training Error for pretraining of AANN')
+  plt.savefig("fig1.jpg")
+
+#function pretraining of networks
+def train(network,loader,epochs,learning_rate):
+  loss_func = nn.MSELoss()
+  learning_rate = learning_rate
+  EPOCHS = epochs
+  Loss=[]
+  epoch_num=[]
+  for epoch in range(EPOCHS):
+      total_loss=0.0
+      for batch_idx, data in enumerate(loader,0):
+          inputs,labels = data
+          inputs = torch.autograd.Variable(inputs)
+          network.zero_grad()
+          pred = network(inputs)
+          loss = loss_func(pred, inputs)
+          
+          #losses.append(loss.cpu().data.item())
+          #print(loss.cpu().data.item())
+          # Backpropagation
+          loss.backward()
+          for f in network.parameters():
+            f.data.sub_(f.grad.data * learning_rate)
+          #optimizer.step()
+          total_loss+=loss.data
+      epoch_num.append(epoch)
+      Loss.append(total_loss)
+      print('epoch no:%d/%d  MSE=%f'%(epoch+1,EPOCHS,total_loss/len(loader))) 
+  Plot(epoch_num,Loss)
+  return network
+
+#creating AANN1
+network1 = AANN(828,400)
+
+#pretrainig of AANN1
+network1 = train(network1,trn_dataloader,25,0.1)
+
+# removing the decoder from AANN1
+new_network1 = nn.Sequential(*list(network1.children())[:-1])
+print(new_network1)
+
+X1 = new_network1.forward(trn_x_torch)
+X1 = X1.detach().numpy()
+print(X1.shape)
+
+X1_torch = torch.from_numpy(X1).type(torch.FloatTensor)
+trn_X1 = TensorDataset(X1_torch,trn_y_torch)
+X1_dataloader = torch.utils.data.DataLoader(trn_X1,shuffle=True)
+
+#creating AANN2 ( 400 - 300 - 400)
+network2 = AANN(400,300)
+
+network2 = train(network2,X1_dataloader,25,0.1)
+
+# removing the decoder from AANN2
+new_network2 = nn.Sequential(*list(network2.children())[:-1])
+print(new_network2)
+
+X2 = new_network2.forward(X1_torch)
+X2 = X2.detach().numpy()
+print(X2.shape)
+
+X2_torch = torch.from_numpy(X2).type(torch.FloatTensor)
+trn_X2 = TensorDataset(X2_torch,trn_y_torch)
+X2_dataloader = torch.utils.data.DataLoader(trn_X2,shuffle=True)
+
+#creating AANN3 ( 300 - 100 - 300)
+network3 = AANN(300,100)
+
+# Training network 3
+network3 = train(network3,X2_dataloader,50,0.9)
+
+""" 
+removing the autoencoder part from network3
+add autoencoder part of network2 and network3
+to network1 and adding one more layer with 
+number of nodes = number of classes and 
+softmax function as its activation function
+"""
+new_network3 = nn.Sequential(*list(network3.children())[:-1])
+#print(new_network2)
+new_network1.add_module("net2",new_network2)
+new_network1.add_module("net3",new_network3)
+#print(new_network1)
+#new_network1.add_module('final_layer1' ,nn.Sequential(nn.Linear(128,64),nn.Tanh()))
+#new_network1.add_module('final_layer2' ,nn.Sequential(nn.Linear(64,32),nn.Tanh()))
+new_network1.add_module('final_layer3' ,nn.Sequential(nn.Linear(100,5),nn.LogSoftmax()))
+print(new_network1)
+
+
+
+
+# training of final classifier with pretrained AANN
+loss_func = nn.NLLLoss()
+optimizer = torch.optim.Adam(new_network1.parameters(), lr=.00005)
+losses = []
+EPOCHS = 100 
+for epoch in range(EPOCHS):
+    total_loss=0.0
+    total =0.0
+    correct =0.0
+    total1=0.0
+    correct1=0.0
+    for batch_idx, (data,target) in enumerate(trn_dataloader):
+        
+        data = torch.autograd.Variable(data)
+    
+        
+        optimizer.zero_grad()
+        
+        pred = new_network1(data)
+        
+        loss = loss_func(pred, target)
+        #print(pred.shape)
+        losses.append(loss.cpu().data.item())
+        #print(loss.cpu().data.item())
+        # Backpropagation
+        loss.backward()
+        
+        optimizer.step()
+        total_loss+=loss.data
+    for data in trn_dataloader:
+        inputs,labels = data
+        inputs =torch.autograd.Variable(inputs)
+        outputs = new_network1(inputs)
+        _, predicted = torch.max(outputs.data,1)
+        total1 = total1 + labels.size(0)
+        correct1 += (predicted==labels).sum()
+
+    for data in val_dataloader:
+        inputs,labels = data
+        inputs =torch.autograd.Variable(inputs)
+        outputs = new_network1(inputs)
+        _, predicted = torch.max(outputs.data,1)
+        total = total + labels.size(0)
+        correct += (predicted==labels).sum()
+      
+    print('epoch no:%d Error:%d Training Accuracy=%f  Test Accuracy=%f'%(epoch+1,total_loss,correct1/total1,correct/total))
+    #print('epoch no:%d  MSE=%f'%(epoch+1,correct/total))
+
+#predicting classes corresponding to each datapoint 
+outputs  = new_network1(val_x_torch)
+_, predicted = torch.max(outputs.data,1)
+
+#plotting a confusion matrix
+from sklearn.metrics import confusion_matrix
+import seaborn as sns
+LABELS = ["Coast","Forest","Mountain","OpenCounrty","Street"]
+conf_matrix = confusion_matrix(predicted,val_y)
+plt.figure(figsize=(12, 12))
+map=sns.heatmap(conf_matrix, xticklabels=LABELS, yticklabels=LABELS, annot=True, fmt="d");
+plt.title("Confusion matrix")
+plt.ylabel('True class')
+plt.xlabel('Predicted class')
+plt.show()
+fig=map.get_figure()
+fig.savefig("confusion_mat.jpg")
+
+from sklearn.decomposition import PCA
+pca = PCA(n_components=650)
+pca.fit(big_frame)
+big_frame=pca.transform(big_frame)
+print(big_frame.shape)
+
+
+
+
+
+
+
+
+
+
+
+
+
+TASK-3
+
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+from torch.autograd import Variable
+import pandas as pd
+import numpy as np
+from sklearn.model_selection import train_test_split
+from torch.utils.data import TensorDataset
+import matplotlib.pyplot as plt
+import tensorflow as tf
+
+#loading the dataset
+import glob
+import pandas as pd
+
+# get data file names
+path =r'/content/drive/My Drive/Deep Learning/dataset2/'
+filenames = {"Ankle boot.csv":0,"Dress.csv":1,"Shirt.csv":2,"T_shirt.csv":3,"Pullover.csv":4}
+labels = []
+dataset = []
+for (filename, index) in filenames.items():
+    pathadd = path + filename
+    df = pd.read_csv(pathadd,header=None)
+    dataset.append(df)
+    for i in range(df.shape[0]):
+        labels.append(index)
+
+# Concatenate all data into one DataFrame
+big_frame = pd.concat(dataset,axis=0)
+print(big_frame.shape)
+big_frame = big_frame.to_numpy()
+big_frame = big_frame
+labels = np.array(labels)
+
+# splitting the dataset into train and test(80-20 split)
+trn_x, val_x ,trn_y,val_y = train_test_split(big_frame,labels,test_size=0.20)
+
+# converting the numpy array into tensor
+trn_x_torch = torch.from_numpy(trn_x).type(torch.FloatTensor)
+trn_y_torch = torch.from_numpy(trn_y)
+
+val_x_torch = torch.from_numpy(val_x).type(torch.FloatTensor)
+val_y_torch = torch.from_numpy(val_y)
+
+trn = TensorDataset(trn_x_torch,trn_y_torch)
+val = TensorDataset(val_x_torch,val_y_torch)
+
+trn_dataloader = torch.utils.data.DataLoader(trn,batch_size=100,shuffle=True)
+val_dataloader = torch.utils.data.DataLoader(val,batch_size=100,shuffle=False)
+
+# Auto Associative Nueral network
+class AANN(nn.Module):
+    def __init__(self,nodes1,nodes2):
+        super(AANN,self).__init__()
+
+        self.encoder = nn.Sequential(
+            nn.Linear(nodes1, nodes2),
+            nn.Tanh())
+
+        self.decoder = nn.Sequential(
+            nn.Linear(nodes2, nodes1), 
+            nn.Tanh())
+        
+    def forward(self, x):
+        x = self.encoder(x)
+        x = self.decoder(x)
+        return x
+
+def Plot(epoch_num,Loss):
+  plt.plot(epoch_num,Loss)
+  plt.xlabel('Epoch Number')
+  plt.ylabel('Training Error')
+  plt.title('Plot of Epoch Number vs Training Error for pretraining of AANN')
+  plt.savefig("fig1.jpg")
+
+#function pretraining of networks
+def train(network,loader,epochs,learning_rate):
+  loss_func = nn.MSELoss()
+  learning_rate = learning_rate
+  EPOCHS = epochs
+  Loss=[]
+  epoch_num=[]
+  for epoch in range(EPOCHS):
+      total_loss=0.0
+      for batch_idx, data in enumerate(loader,0):
+          inputs,labels = data
+          inputs = torch.autograd.Variable(inputs)
+          network.zero_grad()
+          pred = network(inputs)
+          loss = loss_func(pred, inputs)
+          
+          #losses.append(loss.cpu().data.item())
+          #print(loss.cpu().data.item())
+          # Backpropagation
+          loss.backward()
+          for f in network.parameters():
+            f.data.sub_(f.grad.data * learning_rate)
+          #optimizer.step()
+          total_loss+=loss.data
+      epoch_num.append(epoch)
+      Loss.append(total_loss)
+      print('epoch no:%d/%d  MSE=%f'%(epoch+1,EPOCHS,total_loss/len(loader))) 
+  Plot(epoch_num,Loss)
+  return network
+
+#creating AANN1
+network1 = AANN(784,400)
+
+#training of AANN1 (784 - 400 - 784)
+network1 = train(network1,trn_dataloader,25,0.095)
+
+# removing the decoder from AANN1
+new_network1 = nn.Sequential(*list(network1.children())[:-1])
+print(new_network1)
+
+# Making the data ready for next encoder i.e. generating encoded output corresponding to every data point
+X1 = new_network1.forward(trn_x_torch)
+X1 = X1.detach().numpy()
+print(X1.shape)
+
+# Converting the data into tensor
+X1_torch = torch.from_numpy(X1).type(torch.FloatTensor)
+trn_X1 = TensorDataset(X1_torch,trn_y_torch)
+X1_dataloader = torch.utils.data.DataLoader(trn_X1,batch_size=1000,shuffle=True)
+
+
+#creating AANN2(400 - 300 - 400)
+network2 = AANN(400,300)
+
+#training of AANN2
+network2 = train(network2,X1_dataloader,50,0.9)
+
+# removing the decoder from AANN2
+new_network2 = nn.Sequential(*list(network2.children())[:-1])
+print(new_network2)
+
+# Making the data ready for next encoder i.e. generating encoded output corresponding to every data point
+X2 = new_network2.forward(X1_torch)
+X2 = X2.detach().numpy()
+print(X2.shape)
+
+# converting the data into tensor
+X2_torch = torch.from_numpy(X2).type(torch.FloatTensor)
+trn_X2 = TensorDataset(X2_torch,trn_y_torch)
+X2_dataloader = torch.utils.data.DataLoader(trn_X2,batch_size=1000)
+
+#creating AANN3(300 - 100 - 300)
+network3 = AANN(300,100)
+
+#training of AANN3
+network3 = train(network3,X2_dataloader,50,0.9)
+
+""" 
+removing the autoencoder part from network3
+add autoencoder part of network2 and network3
+to network1 and adding one more layer with 
+number of nodes = number of classes and 
+softmax function as its activation function
+"""
+new_network3 = nn.Sequential(*list(network3.children())[:-1])
+#print(new_network2)
+new_network1.add_module("net2",new_network2)
+new_network1.add_module("net3",new_network3)
+#print(new_network1)
+#new_network1.add_module('final_layer1' ,nn.Sequential(nn.Linear(128,64),nn.Tanh()))
+#new_network1.add_module('final_layer2' ,nn.Sequential(nn.Linear(64,32),nn.Tanh()))
+new_network1.add_module('final_layer3' ,nn.Sequential(nn.Linear(100,5),nn.LogSoftmax()))
+print(new_network1)
+
+# Training the final network for classification 
+loss_func = nn.NLLLoss()
+optimizer = torch.optim.Adam(new_network1.parameters(), lr=.00005)
+losses = []
+EPOCHS = 100
+epoch_num=[]
+training_acc=[]
+testing_acc=[] 
+for epoch in range(EPOCHS):
+    total_loss=0.0
+    total =0.0
+    correct =0.0
+    total1=0.0
+    correct1=0.0
+    for batch_idx, (data,target) in enumerate(trn_dataloader):
+        
+        data = torch.autograd.Variable(data)
+    
+        
+        optimizer.zero_grad()
+        
+        pred = new_network1(data)
+        
+        loss = loss_func(pred, target)
+        #print(pred.shape)
+        losses.append(loss.cpu().data.item())
+        #print(loss.cpu().data.item())
+        # Backpropagation
+        loss.backward()
+        
+        optimizer.step()
+        total_loss+=loss.data
+    for data in trn_dataloader:
+        inputs,labels = data
+        inputs =torch.autograd.Variable(inputs)
+        outputs = new_network1(inputs)
+        _, predicted = torch.max(outputs.data,1)
+        total1 = total1 + labels.size(0)
+        correct1 += (predicted==labels).sum()
+    
+    for data in val_dataloader:
+        inputs,labels = data
+        inputs =torch.autograd.Variable(inputs)
+        outputs = new_network1(inputs)
+        _, predicted = torch.max(outputs.data,1)
+        total = total + labels.size(0)
+        correct += (predicted==labels).sum()
+      
+    epoch_num.append(epoch)
+    training_acc.append(correct1/total1)
+    testing_acc.append(correct/total)
+    print('epoch no:%d/%d Error:%d Training Accuracy=%f  Test Accuracy=%f'%(epoch+1,EPOCHS,total_loss,correct1/total1,correct/total))
+    #print('epoch no:%d  MSE=%f'%(epoch+1,correct/total))
+
+#plot of Epoch vs Trainig and testing accuracy
+plt.plot(epoch_num,training_acc,Label = 'Training accuracy')
+plt.plot(epoch_num,testing_acc,Label = 'Testing accuracy')
+plt.xlabel('Epoch Number')
+plt.title('plot of Epoch Number vs training and testing accuracy')
+plt.ylabel('Accuracy')
+plt.legend()
+plt.savefig("fig4.jpg")
+
+#predicting classes corresponding to each datapoint 
+outputs  = new_network1(val_x_torch)
+_, predicted = torch.max(outputs.data,1)
+
+#plotting a confusion matrix
+from sklearn.metrics import confusion_matrix
+import seaborn as sns
+LABELS = ["Ankle boot","Dress","Shirt","T_shirt","Pullover"]
+conf_matrix = confusion_matrix(predicted,val_y)
+plt.figure(figsize=(12, 12))
+map=sns.heatmap(conf_matrix, xticklabels=LABELS, yticklabels=LABELS, annot=True, fmt="d");
+plt.title("Confusion matrix")
+plt.ylabel('True class')
+plt.xlabel('Predicted class')
+plt.show()
+fig=map.get_figure()
+fig.savefig("confusion_mat.jpg")
+
+
+TASK-4
+
+
+import torch
+import torch.nn as nn
+import numpy as np
+import torch.nn.parallel
+import torch.optim as optim
+import pandas as pd
+import torch.utils.data
+from torch.autograd import Variable
+from torch.utils.data import Dataset, DataLoader, TensorDataset
+from tqdm.notebook import tqdm
+from sklearn.metrics import confusion_matrix, classification_report
+from sklearn.model_selection import train_test_split
+import seaborn as sns
+import matplotlib.pyplot as plt
+
+
+class Restd_Boltmn_Mach():
+  def __init__(self, num_visible, num_hidden):
+	self.num_visible = num_visible
+	self.num_hidden = num_hidden
+	self.weights = torch.FloatTensor(np.random.randn(num_visible, num_hidden)) * np.sqrt(2 / num_visible)
+	self.visible_bias = torch.ones(1, num_visible) * 0.5
+	self.hidden_bias = torch.zeros(1, num_hidden)
+
+  def sampling_v(self, h_0):
+	v_1_act = torch.mm(h_0, self.weights.T) + self.visible_bias
+	v_1 = torch.sigmoid(v_1_act)
+	v_1_b = torch.bernoulli(v_1)
+	return v_1, v_1_b
+ 
+  def sampling_h(self, v_0):
+	h_1_act = torch.mm(v_0, self.weights) + self.hidden_bias
+	h_1 = torch.sigmoid(h_1_act)
+	h_1_b = torch.bernoulli(h_1)
+	return h_1, h_1_b
+
+  def free_energy(self, v_b, h_b):
+	E = 0
+	for batch in range(v_b.shape[0]):
+  	v = v_b[batch]
+  	h = h_b[batch]
+  	for i in range(self.num_visible):
+    	for j in range(self.num_hidden):
+      	E += self.weights[i][j] * v[i] * h[j]
+
+  	for i in range(self.num_visible):
+    	E += self.visible_bias[i] * v[i]
+
+  	for j in range(self.num_hidden):
+    	E += self.hidden_bias[j] * h[j]
+ 	 
+	return E / v_b.shape[0]
+
+dataset = []
+labels = []
+path = '/content/drive/My Drive/Colab Notebooks/DL2_Dataset_2/'
+filenames = {"Ankle boot.csv":0,"Dress.csv":1,"Shirt.csv":2,"T_shirt.csv":3,"Pullover.csv":4}
+for (filename, index) in filenames.items():
+  	pathadd = path + filename
+  	df = pd.read_csv(pathadd,header=None,engine='python')
+  	dataset.append(df)
+  	for i in range(df.shape[0]):
+      	labels.append(index)
+big_frame = pd.concat(dataset,axis=0)
+big_frame = big_frame.to_numpy()
+big_frame = torch.FloatTensor(big_frame)
+labels = torch.tensor(labels)
+
+new_frame = big_frame / 255
+                                        	# Creating training set for rbms
+###############################################################################
+train_frame_x = []
+train_frame_y = []
+
+for l in range(30000):
+  tmp = l % 6000
+  if tmp < 4200:
+	train_frame_x.append(new_frame[l])
+	train_frame_y.append(labels[l])
+
+train_frame_x = torch.stack(train_frame_x)
+train_frame_y = torch.stack(train_frame_y)
+###############################################################################
+
+trn = TensorDataset(torch.tensor(train_frame_x), torch.tensor(train_frame_y)) #(new_frame, labels)
+trn_dataloader = torch.utils.data.DataLoader(trn, batch_size=64, shuffle=True)
+
+num_visible = new_frame.shape[1]
+num_hidden_1 = 512
+num_hidden_2 = 256
+num_hidden_3 = 128
+
+rbm_1 = Restd_Boltmn_Mach(num_visible, num_hidden_1)
+rbm_2 = Restd_Boltmn_Mach(num_hidden_1, num_hidden_2)
+rbm_3 = Restd_Boltmn_Mach(num_hidden_2, num_hidden_3)
+
+EPOCHS = [25, 25, 25]
+k = [1, 1, 1]
+alpha_1 = [0.0005, 0.0005, 0.0001]
+alpha_2 = [0.0005, 0.0005, 0.0001]
+alpha_3 = [0.0005, 0.0005, 0.0001]
+
+                                    	# Training 1st RBM
+for ep in tqdm(range(EPOCHS[0])):
+  for batch_idx, data in (enumerate(trn_dataloader)):
+	v_0, _ = data
+	ph_1, h_1_b = rbm_1.sampling_h(torch.bernoulli(v_0))
+    
+	for q in range(k[0]):
+  	v_1, v_1_b = rbm_1.sampling_v(h_1_b)
+  	ph_k, h_1_b = rbm_1.sampling_h(v_1_b)
+
+	rbm_1.weights += alpha_1[0] * (torch.mm(v_0.T, ph_1) - torch.mm(v_1_b.T, ph_k))
+	rbm_1.visible_bias += alpha_1[1] * torch.sum(v_0 - v_1, 0)
+	rbm_1.hidden_bias += alpha_1[2] * torch.sum(ph_1 - ph_k, 0)
+
+                                    	# Training 2nd RBM
+for ep in tqdm(range(EPOCHS[1])):   	 
+  for batch_idx, data in (enumerate(trn_dataloader)):
+	v_0, _ = data
+	v_1, v_1_b = rbm_1.sampling_h(v_0)  	# Same as processing through a Neural Network
+	ph_2, h_2_b = rbm_2.sampling_h(v_1_b)
+    
+	for q in range(k[1]):            	 
+  	v_2, v_2_b = rbm_2.sampling_v(h_2_b)
+  	ph_k2, h_2_b = rbm_2.sampling_h(v_2_b)
+
+	rbm_2.weights += alpha_2[0] * (torch.mm(v_1_b.T, ph_2) - torch.mm(v_2_b.T, ph_k2))
+	rbm_2.visible_bias += alpha_2[1] * torch.sum(v_1 - v_2, 0)
+	rbm_2.hidden_bias += alpha_2[2] * torch.sum(ph_2 - ph_k2, 0)
+
+                                    	# Training 3rd RBM
+for ep in tqdm(range(EPOCHS[2])):
+  for batch_idx, data in (enumerate(trn_dataloader)):
+	v_0, _ = data                    	 
+	v_1, v_1_b = rbm_1.sampling_h(v_0)
+	v_2, v_2_b = rbm_2.sampling_h(v_1)
+	ph_3, h_3_b = rbm_3.sampling_h(v_2_b)
+
+	for q in range(k[2]):             	# Gibbs Sampling
+  	v_3, v_3_b = rbm_3.sampling_v(h_3_b)
+  	ph_k3, h_3_b = rbm_3.sampling_h(v_3_b)
+
+	rbm_3.weights += alpha_3[0] * (torch.mm(v_2_b.T, ph_3) - torch.mm(v_3_b.T, ph_k3))
+	rbm_3.visible_bias += alpha_3[1] * torch.sum(v_2 - v_3, 0)
+	rbm_3.hidden_bias += alpha_3[2] * torch.sum(ph_3 - ph_k3, 0)
+
+_, rbm_data_1 = rbm_1.sampling_h(torch.bernoulli(new_frame))
+_, rbm_data_1 = rbm_2.sampling_h(rbm_data_1)
+_, rbm_data_1 = rbm_3.sampling_h(rbm_data_1)  	# <- Dimensionally reduced data (not required for pre-training)
+
+# Deep Neural Network classifier
+class MulticlassClassification(nn.Module):
+	def __init__(self, num_feature, num_class, nodes_1, nodes_2, nodes_3):
+    	super(MulticlassClassification, self).__init__()
+    	self.layer_1 = nn.Linear(num_feature, nodes_1)
+    	self.layer_2 = nn.Linear(nodes_1, nodes_2)
+    	self.layer_3 = nn.Linear(nodes_2, nodes_3)
+    	self.layer_out = nn.Linear(nodes_3, num_class)    	 
+    	self.act = nn.Sigmoid()
+   	 
+	def forward(self, x):
+   	 
+    	x = self.layer_1(x)
+    	x = self.act(x)
+    	x = self.layer_2(x)
+    	x = self.act(x)   
+    	x = self.layer_3(x)
+    	x = self.act(x)
+    	x = self.layer_out(x)    	 
+   	 
+    	return x
+    
+
+class ClassifierDataset(Dataset):
+    
+	def __init__(self, X_data, y_data):
+    	self.X_data = X_data
+    	self.y_data = y_data
+   	 
+	def __getitem__(self, index):
+    	return self.X_data[index], self.y_data[index]
+   	 
+	def __len__ (self):
+    	return len(self.X_data)
+   	 
+
+train_data_x = []
+val_data_x = []
+test_data_x = []
+train_data_y = []
+val_data_y = []
+test_data_y = []
+
+for l in range(30000):
+  tmp = l % 6000
+  if tmp < 4200:
+	train_data_x.append(big_frame[l])#rbm_data_1[l])
+	train_data_y.append(labels[l])
+  elif tmp < 4800:
+	val_data_x.append(big_frame[l])#rbm_data_1[l])
+	val_data_y.append(labels[l])
+  else:
+	test_data_x.append(big_frame[l])#rbm_data_1[l])
+	test_data_y.append(labels[l])
+
+train_data_x = torch.stack(train_data_x)
+val_data_x = torch.stack(val_data_x)
+test_data_x = torch.stack(test_data_x)
+train_data_y = torch.stack(train_data_y)
+val_data_y = torch.stack(val_data_y)
+test_data_y = torch.stack(test_data_y)
+
+train_data = ClassifierDataset(torch.tensor(train_data_x), torch.tensor(train_data_y).long())
+val_data = ClassifierDataset(torch.tensor(val_data_x), torch.tensor(val_data_y).long())
+test_data = ClassifierDataset(torch.tensor(test_data_x), torch.tensor(test_data_y).long())
+
+train_loader = DataLoader(dataset=train_data, batch_size=100, shuffle=True)
+val_loader = DataLoader(dataset=val_data, batch_size=1, shuffle=False)
+test_loader = DataLoader(dataset=test_data, batch_size=1, shuffle=False)
+
+model = MulticlassClassification(num_feature = num_hidden_3, num_class=len(filenames), nodes_1 = num_hidden_1, nodes_2 = num_hidden_2, nodes_3 = num_hidden_3)
+
+# Assigning pre-trained rbm weights to neural network
+model.layer_1.weight.data = torch.transpose(torch.Tensor(rbm_1.weights), 0, 1)
+model.layer_2.weight.data = torch.transpose(torch.Tensor(rbm_2.weights), 0, 1)
+model.layer_3.weight.data = torch.transpose(torch.Tensor(rbm_3.weights), 0, 1)
+model.layer_1.bias.data = torch.Tensor(np.reshape(np.transpose(rbm_1.hidden_bias), rbm_1.hidden_bias.shape[1]))
+model.layer_2.bias.data = torch.Tensor(np.reshape(np.transpose(rbm_2.hidden_bias), rbm_2.hidden_bias.shape[1]))
+model.layer_3.bias.data = torch.Tensor(np.reshape(np.transpose(rbm_3.hidden_bias), rbm_3.hidden_bias.shape[1]))
+
+
+criterion = nn.CrossEntropyLoss()
+optimizer = optim.Adam(model.parameters(), lr=0.0001)
+EPS = 100
+
+for ep in tqdm(range(EPS)):
+	# TRAINING
+	train_epoch_loss = 0
+	train_epoch_acc = 0
+	model.train()
+	for X_train_batch, y_train_batch in train_loader:
+    	optimizer.zero_grad()
+   	 
+    	y_train_pred = model(X_train_batch)
+   	 
+    	train_loss = criterion(y_train_pred, y_train_batch)
+   	 
+    	y_pred_softmax = torch.log_softmax(y_train_pred, dim = 1)
+    	_, y_pred_tags = torch.max(y_pred_softmax, dim = 1)    
+    
+    	correct_pred = (y_pred_tags == y_train_batch).float()
+    	train_acc = correct_pred.sum() / len(correct_pred)
+    
+    	train_acc = torch.round(train_acc) * 100
+
+    	train_loss.backward()
+    	optimizer.step()
+    	optimizer.zero_grad()
+
+    	train_epoch_loss += train_loss.item()
+    	train_epoch_acc += train_acc.item()
+
+    	# VALIDATION    
+	with torch.no_grad():
+     	 
+  	val_epoch_loss = 0
+  	val_epoch_acc = 0
+     	 
+  	model.eval()
+  	for x_val_batch, y_val_batch in val_loader:
+         	 
+      	y_val_pred = model(x_val_batch)
+                     	 
+      	val_loss = criterion(y_val_pred, y_val_batch)
+
+      	y_val_pred_softmax = torch.log_softmax(y_val_pred, dim = 1)
+      	_, y_val_pred_tags = torch.max(y_val_pred_softmax, dim = 1)    
+    
+      	correct_val_pred = (y_val_pred_tags == y_val_batch).float()
+      	val_acc = correct_val_pred.sum() / len(correct_val_pred)
+    
+      	val_acc = torch.round(val_acc) * 100
+         	 
+      	val_epoch_loss += val_loss.item()
+      	val_epoch_acc += val_acc.item()
+   	 
+	print(f'Epoch {(ep+1)+0:03}: | Train Loss: {train_epoch_loss/len(train_loader):.5f} | Val Loss: {val_epoch_loss/len(val_loader):.5f} | Train Acc: {train_epoch_acc/len(train_loader):.3f}| Val Acc: {val_epoch_acc/len(val_loader):.3f}')
+                              	 
+y_pred_list = []
+with torch.no_grad():
+	model.eval()
+	for x_batch, _ in tqdm(test_loader):
+    	y_test_pred = model(x_batch)
+    	y_pred_softmax = torch.log_softmax(y_test_pred, dim = 1)
+    	_, y_pred_tags = torch.max(y_pred_softmax, dim = 1)
+    	y_pred_list.append(y_pred_tags.cpu().numpy())
+y_pred_list = [a.squeeze().tolist() for a in y_pred_list]
+
+tags = ["Ankle boot","Dress","Shirt","T-shirt","Pullover"]
+confusion_matrix_df = pd.DataFrame(confusion_matrix(test_data_y, y_pred_list))
+plt.figure(figsize=(12, 10))
+sns.heatmap(confusion_matrix_df, xticklabels=tags, yticklabels=tags, annot=True, fmt='d')
+plt.xlabel('True Class')
+plt.ylabel('Predicted Class')
+plt.title('Classification on dataset with pre-training')#Classification on dimensionally reduced data')
+spec = 0
+spec_count = 0
+for ex in range(len(y_pred_list)):
+  spec_count += 1
+  if y_pred_list[ex] == test_data_y[ex]:
+	spec += 1
+print(spec * 100 / spec_count)
+
+
+
+
+
+
+
+
+
+
+
+TASK-5
+
+import torch
+import torch.nn as nn
+import numpy as np
+import torch.distributions as td
+import torch.nn.parallel
+import torch.optim as optim
+import pandas as pd
+import torch.utils.data
+from torch.autograd import Variable
+from torch.utils.data import Dataset, DataLoader, TensorDataset
+from tqdm.notebook import tqdm
+from sklearn.metrics import confusion_matrix, classification_report
+from sklearn.model_selection import train_test_split
+import seaborn as sns
+import matplotlib.pyplot as plt
+import glob
+
+
+class Gaussian_Restd_Boltmn_Mach():
+  def __init__(self, num_visible, num_hidden):
+	self.weights = torch.FloatTensor(num_visible, num_hidden).uniform_(-((6 / (num_visible + num_hidden))** 0.5), ((6 / (num_visible + num_hidden))** 0.5))
+	self.visible_bias = torch.randn((1, num_visible))
+	self.hidden_bias =  torch.randn((1, num_hidden))
+
+  def sampling_v(self, h_0, std_dev):
+	v_1 = torch.mm(h_0, self.weights.T) + self.visible_bias  # mean
+	v_1_b = torch.normal(v_1, 1)    	# assuming unit variance
+	return v_1_b
+ 
+  def sampling_h(self, v_0):
+	h_1_act = torch.mm(v_0, self.weights) + self.hidden_bias	 
+	h_1 = torch.sigmoid(h_1_act)
+	h_1_b = torch.bernoulli(h_1)
+	return h_1, h_1_b
+
+  def process(self, v_0):           	# Same as passing input through neural network layer
+	h_1_act = torch.mm(v_0, self.weights) + self.hidden_bias
+	h_1 = torch.tanh(h_1_act)
+	return h_1
+    
+
+def pre_process(n_frame):         	# pre-processing data -> zero-mean across all features with unit variance
+  feature_std_d = np.std(n_frame, axis = 0)
+  feature_m = np.mean(n_frame, axis = 0)
+  return (n_frame - feature_m) / feature_std_d
+
+dataset = []
+labels = []
+labels_count = np.zeros(5)
+folder = '/content/drive/My Drive/Colab Notebooks/DL2_Dataset_1/'
+classes = {"coast":0,"forest":1,"mountain":2,"opencountry":3,"street":4}
+
+for subfolder,label in classes.items():
+   path= folder + subfolder + '/*.jpg_color_edh_entropy'
+   files=glob.glob(path)
+   labels_count[label] = len(files)
+   for f in tqdm(files):
+ 	data = np.array(pd.read_csv(f,delim_whitespace=True,header=None)).flatten()
+ 	dataset.append(data)
+ 	labels.append(label)
+big_frame = np.array(dataset)
+
+feature_std_dev = np.std(big_frame, axis = 0)
+feature_means = np.mean(big_frame, axis = 0)
+new_frame = (big_frame - feature_means) / feature_std_dev
+
+labels = torch.tensor(labels)
+                            	# Creating training set for rbms
+###############################################################################
+train_frame_x = []
+train_frame_y = []
+k = 0
+l = 0
+while l < big_frame.shape[0]:
+  m = 0
+  while m < 0.7 * labels_count[k]:
+	train_frame_x.append(new_frame[(int)(l + m)])
+	train_frame_y.append(labels[(int)(l + m)])
+	m += 1
+  l += labels_count[k]
+  k += 1
+
+###############################################################################
+
+trn = TensorDataset(torch.FloatTensor(train_frame_x), torch.tensor(train_frame_y)) #(new_frame, labels)#
+trn_dataloader = torch.utils.data.DataLoader(trn, batch_size=32, shuffle=True)
+
+num_visible = new_frame.shape[1] 	 
+num_hidden_1 = 512
+num_hidden_2 = 256
+num_hidden_3 = 128
+
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+print(device)
+
+EPOCHS = [25, 25, 25]
+k = [1, 1, 1]
+alpha_1 = [0.000001, 0.000001, 0.000001]
+alpha_2 = [0.000001, 0.000001, 0.000001]
+alpha_3 = [0.000001, 0.000001, 0.000001]
+
+                                  	# Training first RBM
+rbm_1 = Gaussian_Restd_Boltmn_Mach(num_visible, num_hidden_1)
+
+for ep in tqdm(range(EPOCHS[0])):
+  for batch_idx, data in (enumerate(trn_dataloader)):
+
+	v_0, _ = data
+	ph_1, h_1_b = rbm_1.sampling_h(v_0)
+    
+	for q in range(k[0]):             	# Gibbs Sampling
+  	v_1 = rbm_1.sampling_v(h_1_b, 1)
+  	ph_k, h_1_b = rbm_1.sampling_h(v_1)
+                                        	# Updating the weights
+	rbm_1.weights += alpha_1[0] * (torch.mm(v_0.T, ph_1) - torch.mm(v_1.T, ph_k))
+	rbm_1.visible_bias += alpha_1[1] * torch.sum(v_0 - v_1, 0)
+	rbm_1.hidden_bias += alpha_1[2] * torch.sum(ph_1 - ph_k, 0)
+
+                                      	# Processing and pre-processing data for next RBM
+rbm_data_1 = rbm_1.process(torch.FloatTensor(new_frame))
+new_rbm_data_1 = pre_process(rbm_data_1.numpy())
+                                   	 
+trn = TensorDataset(torch.FloatTensor(new_rbm_data_1))
+trn_dataloader = torch.utils.data.DataLoader(trn, batch_size=32, shuffle=True)
+
+# Training second RBM
+rbm_2 = Gaussian_Restd_Boltmn_Mach(num_hidden_1, num_hidden_2)
+
+for ep in tqdm(range(EPOCHS[1])):   	 
+  for batch_idx, data in (enumerate(trn_dataloader)):
+    
+	v_1 = torch.FloatTensor(torch.stack(data))
+	v_1 = torch.reshape(v_1, (v_1.shape[1], v_1.shape[2]))
+	ph_2, h_2_b = rbm_2.sampling_h(v_1)
+
+	for q in range(k[1]):        	 
+  	v_2 = rbm_2.sampling_v(h_2_b, 1)
+  	ph_k2, h_2_b = rbm_2.sampling_h(v_2)
+    
+	rbm_2.weights += alpha_2[0] * (torch.mm(v_1.T, ph_2) - torch.mm(v_2.T, ph_k2))
+	rbm_2.visible_bias += alpha_2[1] * torch.sum(v_1 - v_2, 0)
+	rbm_2.hidden_bias += alpha_2[2] * torch.sum(ph_2 - ph_k2, 0)
+    
+rbm_data_2 = rbm_2.process(rbm_data_1)
+new_rbm_data_2 = pre_process(rbm_data_2.numpy())
+
+trn = TensorDataset(torch.FloatTensor(new_rbm_data_2))
+trn_dataloader = torch.utils.data.DataLoader(trn, batch_size=32, shuffle=True)
+
+rbm_3 = Gaussian_Restd_Boltmn_Mach(num_hidden_2, num_hidden_3)
+
+for ep in tqdm(range(EPOCHS[2])):
+  for batch_idx, data in (enumerate(trn_dataloader)):
+	v_2 = torch.FloatTensor(torch.stack(data))
+	v_2 = torch.reshape(v_2, (v_2.shape[1], v_2.shape[2]))    
+	ph_3, h_3_b = rbm_3.sampling_h(v_2)
+
+	for q in range(k[2]):
+  	v_3 = rbm_3.sampling_v(h_3_b, 1)
+  	ph_k3, h_3_b = rbm_3.sampling_h(v_3)
+
+	rbm_3.weights += alpha_3[0] * (torch.mm(v_2.T, ph_3) - torch.mm(v_3.T, ph_k3))
+	rbm_3.visible_bias += alpha_3[1] * torch.sum(v_2 - v_3, 0)
+	rbm_3.hidden_bias += alpha_3[2] * torch.sum(ph_3 - ph_k3, 0)
+
+rbm_data_3 = rbm_3.process(rbm_data_2)    	# <- Dimensionally reduced data (not required for pre-training)
+
+# Deep Neural Network classifier
+class MulticlassClassification(nn.Module):
+	def __init__(self, num_feature, num_class, nodes_1, nodes_2, nodes_3):
+    	super(MulticlassClassification, self).__init__()
+    	self.layer_1 = nn.Linear(num_feature, nodes_1)
+    	self.layer_2 = nn.Linear(nodes_1, nodes_2)
+    	self.layer_3 = nn.Linear(nodes_2, nodes_3)
+    	self.layer_out = nn.Linear(nodes_3, num_class)
+    	self.batchnorm0 = nn.BatchNorm1d(num_feature)
+    	self.batchnorm1 = nn.BatchNorm1d(nodes_1)
+    	self.batchnorm2 = nn.BatchNorm1d(nodes_2)
+    	self.act = nn.Tanh()
+   	 
+	def forward(self, x):
+    	x = self.batchnorm0(x)
+
+    	x = self.layer_1(x)   	 
+    	x = self.act(x)
+    	x = self.batchnorm1(x)
+
+    	x = self.layer_2(x)   	 
+    	x = self.act(x)   
+    	x = self.batchnorm2(x)
+
+    	x = self.layer_3(x)
+    	x = self.act(x)
+    	x = self.layer_out(x)
+
+    	return x
+
+	def process_1(self, x):
+  	x = self.layer_1(x)
+
+class ClassifierDataset(Dataset):
+    
+	def __init__(self, X_data, y_data):
+    	self.X_data = X_data
+    	self.y_data = y_data
+   	 
+	def __getitem__(self, index):
+    	return self.X_data[index], self.y_data[index]
+   	 
+	def __len__ (self):
+    	return len(self.X_data)
+   	 
+
+
+train_data_x = []
+val_data_x = []
+test_data_x = []
+train_data_y = []
+val_data_y = []
+test_data_y = []
+
+k = 0
+l = 0
+big_frame_2 = torch.FloatTensor(big_frame)
+while l < big_frame.shape[0]:
+  m = 0
+  while m < 0.7 * labels_count[k]:
+	train_data_x.append(big_frame_2[l + m])#rbm_data_3[l + m])#
+	train_data_y.append(labels[l + m])
+	m += 1
+  while m < 0.8 * labels_count[k]:
+	val_data_x.append(big_frame_2[l + m])#rbm_data_3[l + m])#
+	val_data_y.append(labels[l + m])
+	m += 1
+  while m < labels_count[k]:
+	test_data_x.append(big_frame_2[l + m])#rbm_data_3[l + m])#
+	test_data_y.append(labels[l + m])
+	m += 1
+  l += m
+  k += 1
+ 
+
+train_data_x = torch.stack(train_data_x)
+val_data_x = torch.stack(val_data_x)
+test_data_x = torch.stack(test_data_x)
+train_data_y = torch.stack(train_data_y)
+val_data_y = torch.stack(val_data_y)
+test_data_y = torch.stack(test_data_y)
+
+train_data = ClassifierDataset(torch.tensor(train_data_x), torch.tensor(train_data_y).long())
+val_data = ClassifierDataset(torch.tensor(val_data_x), torch.tensor(val_data_y).long())
+test_data = ClassifierDataset(torch.tensor(test_data_x), torch.tensor(test_data_y).long())
+
+train_loader = DataLoader(dataset=train_data, batch_size=100, shuffle=True)
+val_loader = DataLoader(dataset=val_data, batch_size=1, shuffle=False)
+test_loader = DataLoader(dataset=test_data, batch_size=1, shuffle=False)
+
+
+
+model = MulticlassClassification(num_feature = num_visible, num_class=len(classes), nodes_1 = num_hidden_1, nodes_2 = num_hidden_2, nodes_3 = num_hidden_3)
+
+# Assigning rbm weights to neural network
+model.layer_1.weight.data = torch.transpose(torch.Tensor(rbm_1.weights), 0, 1)
+model.layer_2.weight.data = torch.transpose(torch.Tensor(rbm_2.weights), 0, 1)
+model.layer_3.weight.data = torch.transpose(torch.Tensor(rbm_3.weights), 0, 1)
+model.layer_1.bias.data = torch.Tensor(np.reshape(np.transpose(rbm_1.hidden_bias), rbm_1.hidden_bias.shape[1]))
+model.layer_2.bias.data = torch.Tensor(np.reshape(np.transpose(rbm_2.hidden_bias), rbm_2.hidden_bias.shape[1]))
+model.layer_3.bias.data = torch.Tensor(np.reshape(np.transpose(rbm_3.hidden_bias), rbm_3.hidden_bias.shape[1]))
+
+
+criterion = nn.CrossEntropyLoss()
+optimizer = optim.Adam(model.parameters(), lr=0.0001)
+EPS = 100
+
+for ep in tqdm(range(EPS)):
+	# TRAINING
+	train_epoch_loss = 0
+	train_epoch_acc = 0
+	model.train()
+	for X_train_batch, y_train_batch in train_loader:
+    	optimizer.zero_grad()
+   	 
+    	y_train_pred = model(X_train_batch)
+   	 
+    	train_loss = criterion(y_train_pred, y_train_batch)
+   	 
+    	y_pred_softmax = torch.log_softmax(y_train_pred, dim = 1)
+    	_, y_pred_tags = torch.max(y_pred_softmax, dim = 1)    
+    
+    	correct_pred = (y_pred_tags == y_train_batch).float()
+    	train_acc = correct_pred.sum() / len(correct_pred)
+    
+    	train_acc = torch.round(train_acc) * 100
+
+    	train_loss.backward()
+    	optimizer.step()
+    	optimizer.zero_grad()
+
+    	train_epoch_loss += train_loss.item()
+    	train_epoch_acc += train_acc.item()
+
+    	# VALIDATION    
+	with torch.no_grad():
+     	 
+  	val_epoch_loss = 0
+  	val_epoch_acc = 0
+     	 
+  	model.eval()
+  	for x_val_batch, y_val_batch in val_loader:
+         	 
+      	y_val_pred = model(x_val_batch)
+                     	 
+      	val_loss = criterion(y_val_pred, y_val_batch)
+
+      	y_val_pred_softmax = torch.log_softmax(y_val_pred, dim = 1)
+      	_, y_val_pred_tags = torch.max(y_val_pred_softmax, dim = 1)    
+    
+      	correct_val_pred = (y_val_pred_tags == y_val_batch).float()
+      	val_acc = correct_val_pred.sum() / len(correct_val_pred)
+    
+      	val_acc = torch.round(val_acc) * 100
+         	 
+      	val_epoch_loss += val_loss.item()
+      	val_epoch_acc += val_acc.item()
+   	 
+	print(f'Epoch {(ep+1)+0:03}: | Train Loss: {train_epoch_loss/len(train_loader):.5f} | Val Loss: {val_epoch_loss/len(val_loader):.5f} | Train Acc: {train_epoch_acc/len(train_loader):.3f}| Val Acc: {val_epoch_acc/len(val_loader):.3f}')
+                              	 
+y_pred_list = []
+with torch.no_grad():
+	model.eval()
+	for x_batch, _ in tqdm(test_loader):
+    	y_test_pred = model(x_batch)
+    	y_pred_softmax = torch.log_softmax(y_test_pred, dim = 1)
+    	_, y_pred_tags = torch.max(y_pred_softmax, dim = 1)
+    	y_pred_list.append(y_pred_tags.cpu().numpy())
+y_pred_list = [a.squeeze().tolist() for a in y_pred_list]
+
+tags = ["coast","forest","mountain","open country","street"]
+confusion_matrix_df = pd.DataFrame(confusion_matrix(test_data_y, y_pred_list))
+
+plt.figure(figsize=(12, 10))
+sns.heatmap(confusion_matrix_df, xticklabels=tags, yticklabels=tags, annot=True)
+plt.xlabel('True Class')
+plt.ylabel('Predicted Class')
+plt.title('Classification on dataset with pre-training')#Classification on dimensionally reduced data')#
+spec = 0
+spec_count = 0
+for ex in range(len(y_pred_list)):
+  spec_count += 1
+  if y_pred_list[ex] == test_data_y[ex]:
+	spec += 1
+print(spec * 100 / spec_count)
+
+
